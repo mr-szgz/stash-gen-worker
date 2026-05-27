@@ -126,6 +126,6 @@ func (g Generator) spriteVTT(spritePath string, stepSize float64, spriteChunks i
 		}
 		vtt := strings.Join(vttLines, "\n")
 
-		return os.WriteFile(tmpFn, []byte(vtt), 0644)
+		return os.WriteFile(tmpFn, []byte(vtt), 0o644)
 	}
 }
