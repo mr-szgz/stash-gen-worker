@@ -50,6 +50,10 @@ func (p *scenePaths) GetWebpPreviewPath(checksum string) string {
 	return filepath.Join(p.screenshots, checksum+".webp")
 }
 
+func (p *scenePaths) GetScreenshotPath(checksum string) string {
+	return filepath.Join(p.screenshots, checksum+".jpg")
+}
+
 func (p *scenePaths) GetSpriteImageFilePath(checksum string) string {
 	return filepath.Join(p.vtt, checksum+"_sprite.jpg")
 }
