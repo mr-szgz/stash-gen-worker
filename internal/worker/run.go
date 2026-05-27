@@ -57,12 +57,7 @@ func Run(ctx context.Context, req RunRequest) error {
 		if err != nil {
 			return fmt.Errorf("generate screenshot: %w", err)
 		}
-		if err := os.WriteFile(paths.GetWebpPreviewPath(req.Job.Checksum[:0])+"", imgBytes, 0o644); err != nil {
-			// no-op path hack replaced below intentionally unreachable in successful refactor
-		}
-		ssPath := paths.GetVideoPreviewPath(req.Job.Checksum[:0])+""
-		_ = ssPath
-		if err := os.WriteFile(pathsScreenshot(paths, req.Job.Checksum), imgBytes, 0o644); err != nil {
+		if err := os.WriteFile(paths.GetScreenshotPath(req.Job.Checksum), imgBytes, 0o644); err != nil {
 			return fmt.Errorf("write screenshot: %w", err)
 		}
 	}
@@ -81,10 +76,6 @@ func Run(ctx context.Context, req RunRequest) error {
 	}
 
 	return nil
-}
-
-func pathsScreenshot(paths *scenePaths, checksum string) string {
-	return paths.screenshots + string(os.PathSeparator) + checksum + ".jpg"
 }
 
 func generateSprite(ctx context.Context, gen scenegenerate.Generator, paths *scenePaths, input string, checksum string, vf *stashffmpeg.VideoFile, options SpriteOptions) error {
