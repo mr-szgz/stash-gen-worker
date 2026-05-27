@@ -228,13 +228,14 @@ func runNextJob(args []string, stdout io.Writer) error {
 		return err
 	}
 
-	return processNextQueuedJob(
+	_, err = processNextQueuedJob(
 		firstNonEmpty(jobsDir, cfg.JobsDir, worker.DefaultConfig().JobsDir),
 		firstNonEmpty(generatedDir, cfg.GeneratedDir, worker.DefaultConfig().GeneratedDir),
 		firstNonEmpty(ffmpegPath, cfg.FFMpegPath),
 		firstNonEmpty(ffprobePath, cfg.FFProbePath),
 		stdout,
 	)
+	return err
 }
 
 func runQueue(args []string, stdout io.Writer) error {

@@ -7,12 +7,12 @@ import (
 )
 
 type scenePaths struct {
-	root       string
+	root        string
 	screenshots string
-	vtt        string
-	markers    string
-	transcodes string
-	tmp        string
+	vtt         string
+	markers     string
+	transcodes  string
+	tmp         string
 }
 
 func newScenePaths(root string) *scenePaths {

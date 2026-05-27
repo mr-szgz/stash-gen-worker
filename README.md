@@ -11,25 +11,15 @@ Standalone worker CLI for generating Stash-compatible scene assets outside the m
 - Generates sprite JPG + VTT
 - Generates transcodes
 - Supports JSON job files for distributed workers
+- Can create job files from Stash GraphQL scene IDs
+- Can process queued jobs from `jobs/new`, `jobs/pending`, `jobs/completed`, and `jobs/failed`
 - Cross-compiles for Windows
 
-## Important note about dependencies
+## Dependencies
 
 This worker imports official packages from `github.com/stashapp/stash`.
 
-The current `go.mod` is configured with:
-
-- a `require` on `github.com/stashapp/stash`
-- a local `replace github.com/stashapp/stash => ../stash`
-
-That means the app is immediately compilable when the Stash source tree is checked out adjacent to this repository:
-
-- `../stash-gen-worker`
-- `../stash`
-
-This is the safest way to keep the worker aligned with Stash internals while the CLI is being developed.
-
-If you want, the next step can be to vendor/fork only the minimal Stash packages needed so this repo builds fully standalone without a local sibling checkout.
+The module now builds directly against the published Stash module version declared in `go.mod`.
 
 ## Build
 
@@ -56,13 +46,31 @@ They can be supplied explicitly or discovered on PATH.
 
 ## Usage
 
-### Simple command flags
+### Worker config
+
+You can keep shared worker settings in a JSON config file and pass it with `--config`.
+
+```json
+{
+  "jobs_dir": "./jobs",
+  "generated_dir": "/srv/stash/.stash/generated",
+  "ffmpeg_path": "",
+  "ffprobe_path": "",
+  "stash_graphql_endpoint": "http://localhost:9999/graphql",
+  "stash_api_key": ""
+}
+```
+
+`generated_dir` should be the worker host path that writes directly into the Stash server's generated assets directory.
+
+### Run a single job directly
 
 ```bash
 stash-gen-worker \
+  --config ./worker-config.json \
   --input /path/to/scene.mp4 \
   --checksum abc123 \
-  --generated ./generated \
+  --generated /srv/stash/.stash/generated \
   --preview \
   --webp \
   --screenshot \
@@ -74,9 +82,11 @@ stash-gen-worker \
 
 ```json
 {
+  "scene_id": "123",
+  "scene_title": "Sample Scene",
   "input_path": "/path/to/scene.mp4",
   "checksum": "abc123",
-  "generated_dir": "./generated",
+  "generated_dir": "/srv/stash/.stash/generated",
   "preview": true,
   "webp": true,
   "screenshot": true,
@@ -103,5 +113,51 @@ stash-gen-worker \
 Run it with:
 
 ```bash
-stash-gen-worker --job ./job.json
+stash-gen-worker --config ./worker-config.json --job ./job.json
 ```
+
+### Create a queued job from Stash GraphQL
+
+This creates a JSON job in `jobs/new/` using a Stash scene ID and the scene's first file path plus MD5 fingerprint.
+
+```bash
+stash-gen-worker generate-job \
+  --config ./worker-config.json \
+  --scene-id 123
+```
+
+You can also override the queue or generated destination at creation time:
+
+```bash
+stash-gen-worker generate-job \
+  --scene-id 123 \
+  --stash-url http://localhost:9999/graphql \
+  --stash-api-key your-api-key \
+  --jobs-dir ./jobs \
+  --generated /srv/stash/.stash/generated
+```
+
+If no asset flags are supplied for `generate-job`, the worker enables preview, webp, screenshot, and sprite generation by default.
+
+### Process queued jobs
+
+Process a single queued job:
+
+```bash
+stash-gen-worker run-next --config ./worker-config.json
+```
+
+Process all currently queued jobs:
+
+```bash
+stash-gen-worker run-queue --config ./worker-config.json
+```
+
+Queued job files move through:
+
+- `jobs/new/` for newly created jobs
+- `jobs/pending/` once a worker claims a job
+- `jobs/completed/` after a successful run
+- `jobs/failed/` after a failed run
+
+Moving `jobs/new/` to `jobs/pending/` happens before execution to reduce the chance of double-running the same job.

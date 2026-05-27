@@ -13,11 +13,11 @@ import (
 )
 
 type Queue struct {
-	root      string
-	newDir    string
-	pendingDir string
+	root         string
+	newDir       string
+	pendingDir   string
 	completedDir string
-	failedDir string
+	failedDir    string
 }
 
 type QueuedJob struct {
