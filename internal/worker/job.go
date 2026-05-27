@@ -103,9 +103,6 @@ func (j *Job) ApplyDefaults(defaultGeneratedDir string) {
 	if j.MaxRetries <= 0 {
 		j.MaxRetries = defaults.MaxRetries
 	}
-	if j.RetryCount < 0 {
-		j.RetryCount = 0
-	}
 }
 
 func (p PreviewOptions) ToStash() scenegenerate.PreviewOptions {
