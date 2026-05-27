@@ -2,7 +2,13 @@ package worker
 
 import scenegenerate "github.com/stashapp/stash/pkg/scene/generate"
 
+const (
+	CurrentJobSchemaVersion = 1
+	DefaultMaxRetries       = 3
+)
+
 type Job struct {
+	SchemaVersion  int            `json:"schema_version"`
 	SceneID        string         `json:"scene_id,omitempty"`
 	SceneTitle     string         `json:"scene_title,omitempty"`
 	InputPath      string         `json:"input_path"`
@@ -14,6 +20,9 @@ type Job struct {
 	Sprite         bool           `json:"sprite"`
 	Transcode      bool           `json:"transcode"`
 	Overwrite      bool           `json:"overwrite"`
+	RetryCount     int            `json:"retry_count,omitempty"`
+	MaxRetries     int            `json:"max_retries,omitempty"`
+	LastError      string         `json:"last_error,omitempty"`
 	PreviewOptions PreviewOptions `json:"preview_options"`
 	SpriteOptions  SpriteOptions  `json:"sprite_options"`
 }
@@ -36,8 +45,10 @@ type SpriteOptions struct {
 
 func DefaultJob() Job {
 	return Job{
-		GeneratedDir: "./generated",
-		Overwrite:    true,
+		SchemaVersion: CurrentJobSchemaVersion,
+		GeneratedDir:  "./generated",
+		Overwrite:     true,
+		MaxRetries:    DefaultMaxRetries,
 		PreviewOptions: PreviewOptions{
 			Segments:        12,
 			SegmentDuration: 0.5,
@@ -56,6 +67,9 @@ func DefaultJob() Job {
 func (j *Job) ApplyDefaults(defaultGeneratedDir string) {
 	defaults := DefaultJob()
 
+	if j.SchemaVersion <= 0 {
+		j.SchemaVersion = defaults.SchemaVersion
+	}
 	if j.GeneratedDir == "" {
 		if defaultGeneratedDir != "" {
 			j.GeneratedDir = defaultGeneratedDir
@@ -85,6 +99,12 @@ func (j *Job) ApplyDefaults(defaultGeneratedDir string) {
 	}
 	if j.SpriteOptions.Size <= 0 {
 		j.SpriteOptions.Size = defaults.SpriteOptions.Size
+	}
+	if j.MaxRetries <= 0 {
+		j.MaxRetries = defaults.MaxRetries
+	}
+	if j.RetryCount < 0 {
+		j.RetryCount = 0
 	}
 }
 

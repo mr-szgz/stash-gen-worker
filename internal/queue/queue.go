@@ -2,6 +2,7 @@ package queue
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/mr-szgz/stash-gen-worker/internal/worker"
 )
+
+var ErrDuplicateJob = errors.New("duplicate queued job")
 
 type Queue struct {
 	root         string
@@ -51,31 +54,18 @@ func (q Queue) Enqueue(job worker.Job, nameHint string) (string, error) {
 		return "", err
 	}
 
-	name := q.jobFileName(nameHint)
-	target := filepath.Join(q.newDir, name)
-	tmp, err := os.CreateTemp(q.newDir, "job-*.json")
+	duplicatePath, err := q.findDuplicateActiveJob(job)
 	if err != nil {
-		return "", fmt.Errorf("creating temporary job file: %w", err)
+		return "", err
+	}
+	if duplicatePath != "" {
+		return "", fmt.Errorf("%w: %s", ErrDuplicateJob, duplicatePath)
 	}
 
-	enc := json.NewEncoder(tmp)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(job); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name())
-		return "", fmt.Errorf("writing job file: %w", err)
+	target := filepath.Join(q.newDir, q.jobFileName(nameHint))
+	if err := writeJobAtomic(target, job); err != nil {
+		return "", err
 	}
-
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmp.Name())
-		return "", fmt.Errorf("closing job file: %w", err)
-	}
-
-	if err := os.Rename(tmp.Name(), target); err != nil {
-		_ = os.Remove(tmp.Name())
-		return "", fmt.Errorf("moving job file into queue: %w", err)
-	}
-
 	return target, nil
 }
 
@@ -121,6 +111,55 @@ func (q Queue) AcquireNext() (*QueuedJob, error) {
 	return nil, nil
 }
 
+func (q Queue) RecoverPendingStale(maxAge time.Duration) (int, error) {
+	if err := q.Ensure(); err != nil {
+		return 0, err
+	}
+	if maxAge <= 0 {
+		return 0, nil
+	}
+
+	entries, err := filepath.Glob(filepath.Join(q.pendingDir, "*.json"))
+	if err != nil {
+		return 0, fmt.Errorf("listing pending jobs: %w", err)
+	}
+	sort.Strings(entries)
+
+	recovered := 0
+	now := time.Now()
+	for _, path := range entries {
+		info, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return recovered, fmt.Errorf("stat pending job: %w", err)
+		}
+		if now.Sub(info.ModTime()) < maxAge {
+			continue
+		}
+
+		target := filepath.Join(q.newDir, q.jobFileName(strings.TrimSuffix(filepath.Base(path), ".json")))
+		if err := os.Rename(path, target); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return recovered, fmt.Errorf("recovering pending job: %w", err)
+		}
+		recovered++
+	}
+
+	return recovered, nil
+}
+
+func (q Queue) RequeueFailed(limit int) (int, error) {
+	return q.requeueFromDir(q.failedDir, limit)
+}
+
+func (q Queue) RequeuePending(limit int) (int, error) {
+	return q.requeueFromDir(q.pendingDir, limit)
+}
+
 func (j QueuedJob) MarkCompleted() (string, error) {
 	return j.move(filepath.Join(j.queue.completedDir, j.Name))
 }
@@ -129,11 +168,133 @@ func (j QueuedJob) MarkFailed() (string, error) {
 	return j.move(filepath.Join(j.queue.failedDir, j.Name))
 }
 
+func (j QueuedJob) Requeue(updated worker.Job) (string, error) {
+	if err := writeJobAtomic(j.Path, updated); err != nil {
+		return "", err
+	}
+
+	target := filepath.Join(j.queue.newDir, j.queue.jobFileName(strings.TrimSuffix(j.Name, ".json")))
+	if err := os.Rename(j.Path, target); err != nil {
+		return "", fmt.Errorf("moving job file: %w", err)
+	}
+	return target, nil
+}
+
+func (j QueuedJob) Update(updated worker.Job) error {
+	return writeJobAtomic(j.Path, updated)
+}
+
 func (j QueuedJob) move(target string) (string, error) {
 	if err := os.Rename(j.Path, target); err != nil {
 		return "", fmt.Errorf("moving job file: %w", err)
 	}
 	return target, nil
+}
+
+func (q Queue) requeueFromDir(dir string, limit int) (int, error) {
+	if err := q.Ensure(); err != nil {
+		return 0, err
+	}
+
+	entries, err := filepath.Glob(filepath.Join(dir, "*.json"))
+	if err != nil {
+		return 0, fmt.Errorf("listing jobs for requeue: %w", err)
+	}
+	sort.Strings(entries)
+
+	count := 0
+	for _, path := range entries {
+		if limit > 0 && count >= limit {
+			break
+		}
+
+		job, err := readJob(path)
+		if err != nil {
+			continue
+		}
+
+		duplicatePath, err := q.findDuplicateActiveJob(job)
+		if err != nil {
+			return count, err
+		}
+		if duplicatePath != "" {
+			continue
+		}
+
+		target := filepath.Join(q.newDir, q.jobFileName(strings.TrimSuffix(filepath.Base(path), ".json")))
+		if err := os.Rename(path, target); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return count, fmt.Errorf("requeueing job: %w", err)
+		}
+		count++
+	}
+
+	return count, nil
+}
+
+func (q Queue) findDuplicateActiveJob(job worker.Job) (string, error) {
+	for _, dir := range []string{q.newDir, q.pendingDir} {
+		entries, err := filepath.Glob(filepath.Join(dir, "*.json"))
+		if err != nil {
+			return "", fmt.Errorf("listing queued jobs: %w", err)
+		}
+		for _, path := range entries {
+			existing, err := readJob(path)
+			if err != nil {
+				continue
+			}
+			if duplicateKey(existing) == duplicateKey(job) && duplicateKey(job) != "" {
+				return path, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+func duplicateKey(job worker.Job) string {
+	checksum := strings.TrimSpace(job.Checksum)
+	if checksum == "" {
+		return ""
+	}
+
+	if sceneID := strings.TrimSpace(job.SceneID); sceneID != "" {
+		return "scene:" + sceneID + "|" + checksum
+	}
+
+	inputPath := strings.TrimSpace(job.InputPath)
+	if inputPath == "" {
+		return ""
+	}
+	return "path:" + inputPath + "|" + checksum
+}
+
+func writeJobAtomic(path string, job worker.Job) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "job-*.json")
+	if err != nil {
+		return fmt.Errorf("creating temporary job file: %w", err)
+	}
+
+	enc := json.NewEncoder(tmp)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(job); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("writing job file: %w", err)
+	}
+
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("closing job file: %w", err)
+	}
+
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("moving job file into queue: %w", err)
+	}
+
+	return nil
 }
 
 func (q Queue) jobFileName(nameHint string) string {

@@ -82,6 +82,7 @@ stash-gen-worker \
 
 ```json
 {
+  "schema_version": 1,
   "scene_id": "123",
   "scene_title": "Sample Scene",
   "input_path": "/path/to/scene.mp4",
@@ -93,6 +94,8 @@ stash-gen-worker \
   "sprite": true,
   "transcode": false,
   "overwrite": true,
+  "retry_count": 0,
+  "max_retries": 3,
   "preview_options": {
     "segments": 12,
     "segment_duration": 0.5,
@@ -153,11 +156,39 @@ Process all currently queued jobs:
 stash-gen-worker run-queue --config ./worker-config.json
 ```
 
+Recover stale pending jobs faster (default is 15 minutes):
+
+```bash
+stash-gen-worker run-next --config ./worker-config.json --pending-timeout 2m
+```
+
+Requeue jobs from failed/pending back to new:
+
+```bash
+stash-gen-worker requeue --config ./worker-config.json
+```
+
 Queued job files move through:
 
 - `jobs/new/` for newly created jobs
 - `jobs/pending/` once a worker claims a job
 - `jobs/completed/` after a successful run
-- `jobs/failed/` after a failed run
+- `jobs/failed/` after exhausting retry attempts or invalid job input
 
 Moving `jobs/new/` to `jobs/pending/` happens before execution to reduce the chance of double-running the same job.
+
+Retry behavior:
+
+- Jobs track `retry_count` and `max_retries` in JSON
+- Worker failures requeue the job to `jobs/new/` until retry limit is reached
+- Once retries are exhausted, jobs move to `jobs/failed/`
+
+Recovery behavior:
+
+- `run-next` and `run-queue` automatically move stale `jobs/pending/` entries back to `jobs/new/` (configurable with `--pending-timeout`)
+- `requeue` can manually move jobs from `jobs/failed/` and/or `jobs/pending/` back to `jobs/new/`
+- New job creation rejects duplicates already present in `jobs/new/` or `jobs/pending/` for the same scene/checksum.
+
+Retention policy:
+
+- Completed and failed job files are retained in their directories until manually cleaned up.
