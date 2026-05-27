@@ -6,13 +6,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"image"
 	"os"
 	"path/filepath"
 
-	"github.com/disintegration/imaging"
-	stashffmpeg "github.com/stashapp/stash/pkg/ffmpeg"
-	scenegenerate "github.com/stashapp/stash/pkg/scene/generate"
+	stashffmpeg "github.com/mr-szgz/stash-gen-worker/third_party/stash/pkg/ffmpeg"
 
 	"github.com/mr-szgz/stash-gen-worker/internal/worker"
 )
@@ -120,28 +117,23 @@ func run() error {
 		return err
 	}
 
+	paths := worker.NewOutputPaths(job.GeneratedDir)
 	if job.Screenshot {
-		out := filepath.Join(job.GeneratedDir, "screenshots", job.Checksum+".jpg")
-		fmt.Println("screenshot:", out)
+		fmt.Println("screenshot:", paths.Screenshot(job.Checksum))
 	}
 	if job.Preview {
-		out := filepath.Join(job.GeneratedDir, "screenshots", job.Checksum+".mp4")
-		fmt.Println("preview:", out)
+		fmt.Println("preview:", paths.Preview(job.Checksum))
 	}
 	if job.WebP {
-		out := filepath.Join(job.GeneratedDir, "screenshots", job.Checksum+".webp")
-		fmt.Println("webp:", out)
+		fmt.Println("webp:", paths.WebP(job.Checksum))
 	}
 	if job.Sprite {
-		fmt.Println("sprite image:", filepath.Join(job.GeneratedDir, "vtt", job.Checksum+"_sprite.jpg"))
-		fmt.Println("sprite vtt:", filepath.Join(job.GeneratedDir, "vtt", job.Checksum+"_thumbs.vtt"))
+		fmt.Println("sprite image:", paths.SpriteImage(job.Checksum))
+		fmt.Println("sprite vtt:", paths.SpriteVTT(job.Checksum))
 	}
 	if job.Transcode {
-		fmt.Println("transcode:", filepath.Join(job.GeneratedDir, "transcodes", job.Checksum+".mp4"))
+		fmt.Println("transcode:", paths.Transcode(job.Checksum))
 	}
 
-	_ = scenegenerate.PreviewOptions{}
-	_ = imaging.JPEGQuality(90)
-	_ = image.Point{}
 	return nil
 }

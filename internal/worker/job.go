@@ -1,6 +1,6 @@
 package worker
 
-import scenegenerate "github.com/stashapp/stash/pkg/scene/generate"
+import scenegenerate "github.com/mr-szgz/stash-gen-worker/third_party/stash/pkg/scene/generate"
 
 type Job struct {
 	InputPath      string         `json:"input_path"`

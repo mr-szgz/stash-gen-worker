@@ -7,12 +7,12 @@ import (
 )
 
 type scenePaths struct {
-	root       string
+	root        string
 	screenshots string
-	vtt        string
-	markers    string
-	transcodes string
-	tmp        string
+	vtt         string
+	markers     string
+	transcodes  string
+	tmp         string
 }
 
 func newScenePaths(root string) *scenePaths {
@@ -60,4 +60,8 @@ func (p *scenePaths) GetSpriteVttFilePath(checksum string) string {
 
 func (p *scenePaths) GetTranscodePath(checksum string) string {
 	return filepath.Join(p.transcodes, checksum+".mp4")
+}
+
+func (p *scenePaths) GetScreenshotPath(checksum string) string {
+	return filepath.Join(p.screenshots, checksum+".jpg")
 }

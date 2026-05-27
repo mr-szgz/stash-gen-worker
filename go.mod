@@ -2,6 +2,9 @@ module github.com/mr-szgz/stash-gen-worker
 
 go 1.25.0
 
-require github.com/stashapp/stash v0.0.0-00010101000000-000000000000
+require (
+	github.com/disintegration/imaging v1.6.2
+	golang.org/x/sys v0.45.0
+)
 
-replace github.com/stashapp/stash => ../stash
+require golang.org/x/image v0.0.0-20191009234506-e7c1f5e7dbb8 // indirect

@@ -1,0 +1,50 @@
+name: Update vendored Stash files
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: 'Upstream stashapp/stash ref to vendor'
+        required: false
+        default: '4187d164b349f8442a4f31c72bb477302590a9a4'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-vendor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Sync vendored files
+        env:
+          UPSTREAM_REF: ${{ inputs.upstream_ref }}
+        run: scripts/sync-stash-vendor.sh
+
+      - name: Tidy module
+        run: go mod tidy
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: chore/update-vendored-stash-${{ inputs.upstream_ref }}
+          commit-message: 'chore: update vendored stash files'
+          title: 'chore: update vendored stash files'
+          body: |
+            Updates vendored upstream Stash files under `third_party/stash/`.
+
+            - synced files using `scripts/sync-stash-vendor.sh`
+            - ran `go mod tidy`
+            - ran `go test ./...`
+          delete-branch: true

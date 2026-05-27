@@ -4,32 +4,23 @@ Standalone worker CLI for generating Stash-compatible scene assets outside the m
 
 ## Features
 
-- Reuses official Stash generation packages
-- Generates scene preview MP4
-- Generates preview WebP
-- Generates screenshot JPG
-- Generates sprite JPG + VTT
-- Generates transcodes
-- Supports JSON job files for distributed workers
-- Cross-compiles for Windows
+- self-contained Go module with no sibling `../stash` checkout requirement
+- reuses a minimal vendored subset of upstream Stash generation code
+- generates scene preview MP4
+- generates preview WebP
+- generates screenshot JPG
+- generates sprite JPG + VTT
+- generates transcodes
+- supports JSON job files for distributed workers
+- includes sync scripts and a manual GitHub Actions workflow for upstream vendor refreshes
 
-## Important note about dependencies
+## Repository layout
 
-This worker imports official packages from `github.com/stashapp/stash`.
-
-The current `go.mod` is configured with:
-
-- a `require` on `github.com/stashapp/stash`
-- a local `replace github.com/stashapp/stash => ../stash`
-
-That means the app is immediately compilable when the Stash source tree is checked out adjacent to this repository:
-
-- `../stash-gen-worker`
-- `../stash`
-
-This is the safest way to keep the worker aligned with Stash internals while the CLI is being developed.
-
-If you want, the next step can be to vendor/fork only the minimal Stash packages needed so this repo builds fully standalone without a local sibling checkout.
+- `cmd/stash-gen-worker/` - CLI entrypoint
+- `internal/worker/` - worker orchestration and output path helpers
+- `third_party/stash/` - vendored upstream Stash files used by the worker
+- `scripts/` - upstream sync scripts (`.sh` and `.ps1`)
+- `.agents/references/` - practical grounding docs for future agents
 
 ## Build
 
@@ -52,7 +43,7 @@ The worker needs:
 - `ffmpeg`
 - `ffprobe`
 
-They can be supplied explicitly or discovered on PATH.
+They can be supplied explicitly or discovered on `PATH`.
 
 ## Usage
 
@@ -105,3 +96,13 @@ Run it with:
 ```bash
 stash-gen-worker --job ./job.json
 ```
+
+## Vendored upstream sync
+
+The repo vendors a minimal subset of `stashapp/stash` under `third_party/stash/`.
+
+- Linux/macOS: `scripts/sync-stash-vendor.sh`
+- PowerShell: `scripts/sync-stash-vendor.ps1`
+- GitHub Actions: manually run `Update vendored Stash files`
+
+The workflow syncs vendored files, runs `go mod tidy`, runs `go test ./...`, and opens a PR with the refresh.
