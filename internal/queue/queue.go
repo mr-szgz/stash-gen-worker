@@ -137,7 +137,7 @@ func (j QueuedJob) move(target string) (string, error) {
 }
 
 func (q Queue) jobFileName(nameHint string) string {
-	timestamp := time.Now().UTC().Format("20060102T150405.000000000Z")
+	timestamp := time.Now().UTC().Format("20060102T150405.000Z")
 	name := sanitizeName(nameHint)
 	if name == "" {
 		name = "job"
