@@ -11,6 +11,9 @@ func TestJobApplyDefaults(t *testing.T) {
 	if job.GeneratedDir != "/srv/stash/generated" {
 		t.Fatalf("expected generated dir default, got %q", job.GeneratedDir)
 	}
+	if job.SchemaVersion != CurrentJobSchemaVersion {
+		t.Fatalf("expected schema version %d, got %d", CurrentJobSchemaVersion, job.SchemaVersion)
+	}
 	if job.PreviewOptions.Segments != 12 {
 		t.Fatalf("expected default preview segments, got %d", job.PreviewOptions.Segments)
 	}
@@ -22,6 +25,9 @@ func TestJobApplyDefaults(t *testing.T) {
 	}
 	if job.SpriteOptions.Size != 320 {
 		t.Fatalf("expected default sprite size, got %d", job.SpriteOptions.Size)
+	}
+	if job.MaxRetries != DefaultMaxRetries {
+		t.Fatalf("expected default max retries %d, got %d", DefaultMaxRetries, job.MaxRetries)
 	}
 }
 

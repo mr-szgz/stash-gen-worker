@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	stashffmpeg "github.com/stashapp/stash/pkg/ffmpeg"
 
@@ -36,6 +37,8 @@ func run(args []string, stdout io.Writer) error {
 			return runNextJob(args[1:], stdout)
 		case "run-queue":
 			return runQueue(args[1:], stdout)
+		case "requeue":
+			return runRequeue(args[1:], stdout)
 		default:
 			return fmt.Errorf("unknown command %q", args[0])
 		}
@@ -212,12 +215,14 @@ func runNextJob(args []string, stdout io.Writer) error {
 	var generatedDir string
 	var ffmpegPath string
 	var ffprobePath string
+	var pendingTimeout time.Duration
 
 	fs.StringVar(&configPath, "config", "", "path to worker config JSON file")
 	fs.StringVar(&jobsDir, "jobs-dir", "", "worker jobs root directory")
 	fs.StringVar(&generatedDir, "generated", "", "default generated output root")
 	fs.StringVar(&ffmpegPath, "ffmpeg", "", "path to ffmpeg executable")
 	fs.StringVar(&ffprobePath, "ffprobe", "", "path to ffprobe executable")
+	fs.DurationVar(&pendingTimeout, "pending-timeout", 15*time.Minute, "requeue pending jobs older than this duration")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -228,8 +233,13 @@ func runNextJob(args []string, stdout io.Writer) error {
 		return err
 	}
 
+	resolvedJobsDir := firstNonEmpty(jobsDir, cfg.JobsDir, worker.DefaultConfig().JobsDir)
+	if err := recoverPendingJobs(resolvedJobsDir, pendingTimeout, stdout); err != nil {
+		return err
+	}
+
 	_, err = processNextQueuedJob(
-		firstNonEmpty(jobsDir, cfg.JobsDir, worker.DefaultConfig().JobsDir),
+		resolvedJobsDir,
 		firstNonEmpty(generatedDir, cfg.GeneratedDir, worker.DefaultConfig().GeneratedDir),
 		firstNonEmpty(ffmpegPath, cfg.FFMpegPath),
 		firstNonEmpty(ffprobePath, cfg.FFProbePath),
@@ -247,12 +257,14 @@ func runQueue(args []string, stdout io.Writer) error {
 	var generatedDir string
 	var ffmpegPath string
 	var ffprobePath string
+	var pendingTimeout time.Duration
 
 	fs.StringVar(&configPath, "config", "", "path to worker config JSON file")
 	fs.StringVar(&jobsDir, "jobs-dir", "", "worker jobs root directory")
 	fs.StringVar(&generatedDir, "generated", "", "default generated output root")
 	fs.StringVar(&ffmpegPath, "ffmpeg", "", "path to ffmpeg executable")
 	fs.StringVar(&ffprobePath, "ffprobe", "", "path to ffprobe executable")
+	fs.DurationVar(&pendingTimeout, "pending-timeout", 15*time.Minute, "requeue pending jobs older than this duration")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -268,6 +280,10 @@ func runQueue(args []string, stdout io.Writer) error {
 	resolvedFFMpeg := firstNonEmpty(ffmpegPath, cfg.FFMpegPath)
 	resolvedFFProbe := firstNonEmpty(ffprobePath, cfg.FFProbePath)
 
+	if err := recoverPendingJobs(resolvedJobsDir, pendingTimeout, stdout); err != nil {
+		return err
+	}
+
 	processed := 0
 	for {
 		ok, err := processNextQueuedJob(resolvedJobsDir, resolvedGeneratedDir, resolvedFFMpeg, resolvedFFProbe, stdout)
@@ -281,6 +297,59 @@ func runQueue(args []string, stdout io.Writer) error {
 	}
 
 	_, _ = fmt.Fprintf(stdout, "processed jobs: %d\n", processed)
+	return nil
+}
+
+func runRequeue(args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("requeue", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	var configPath string
+	var jobsDir string
+	var includeFailed bool
+	var includePending bool
+	var limit int
+
+	fs.StringVar(&configPath, "config", "", "path to worker config JSON file")
+	fs.StringVar(&jobsDir, "jobs-dir", "", "worker jobs root directory")
+	fs.BoolVar(&includeFailed, "failed", false, "requeue jobs from jobs/failed")
+	fs.BoolVar(&includePending, "pending", false, "requeue jobs from jobs/pending")
+	fs.IntVar(&limit, "limit", 0, "max number of jobs to requeue from each selected source (0 = all)")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	cfg, err := worker.LoadConfig(configPath)
+	if err != nil {
+		return err
+	}
+
+	if !includeFailed && !includePending {
+		includeFailed = true
+		includePending = true
+	}
+
+	q := queue.New(firstNonEmpty(jobsDir, cfg.JobsDir, worker.DefaultConfig().JobsDir))
+	if err := q.Ensure(); err != nil {
+		return err
+	}
+
+	if includeFailed {
+		requeuedFailed, err := q.RequeueFailed(limit)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(stdout, "requeued from failed: %d\n", requeuedFailed)
+	}
+	if includePending {
+		requeuedPending, err := q.RequeuePending(limit)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(stdout, "requeued from pending: %d\n", requeuedPending)
+	}
+
 	return nil
 }
 
@@ -304,6 +373,21 @@ func processNextQueuedJob(jobsDir string, defaultGeneratedDir string, ffmpegPath
 	}
 
 	if err := executeJob(context.Background(), queuedJob.Job, ffmpegPath, ffprobePath, stdout); err != nil {
+		retryJob := queuedJob.Job
+		retryJob.RetryCount++
+		retryJob.LastError = err.Error()
+		if retryJob.RetryCount <= retryJob.MaxRetries {
+			requeuedPath, moveErr := queuedJob.Requeue(retryJob)
+			if moveErr != nil {
+				return false, fmt.Errorf("%w (requeue failed job: %v)", err, moveErr)
+			}
+			_, _ = fmt.Fprintf(stdout, "requeued job: %s (retry %d/%d)\n", requeuedPath, retryJob.RetryCount, retryJob.MaxRetries)
+			return true, nil
+		}
+		if updateErr := queuedJob.Update(retryJob); updateErr != nil {
+			return false, fmt.Errorf("%w (updating failed job metadata: %v)", err, updateErr)
+		}
+
 		failedPath, moveErr := queuedJob.MarkFailed()
 		if moveErr != nil {
 			return false, fmt.Errorf("%w (moving failed job: %v)", err, moveErr)
@@ -317,6 +401,18 @@ func processNextQueuedJob(jobsDir string, defaultGeneratedDir string, ffmpegPath
 	}
 	_, _ = fmt.Fprintf(stdout, "completed job: %s\n", completedPath)
 	return true, nil
+}
+
+func recoverPendingJobs(jobsDir string, pendingTimeout time.Duration, stdout io.Writer) error {
+	q := queue.New(jobsDir)
+	recovered, err := q.RecoverPendingStale(pendingTimeout)
+	if err != nil {
+		return err
+	}
+	if recovered > 0 {
+		_, _ = fmt.Fprintf(stdout, "recovered pending jobs: %d\n", recovered)
+	}
+	return nil
 }
 
 func runWorkerJob(ctx context.Context, job worker.Job, ffmpegPath string, ffprobePath string, stdout io.Writer) error {
