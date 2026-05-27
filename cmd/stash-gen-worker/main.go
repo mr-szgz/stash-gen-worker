@@ -475,6 +475,9 @@ func readJobFile(path string) (worker.Job, error) {
 }
 
 func validateJob(job worker.Job) error {
+	if job.SchemaVersion <= 0 {
+		return errors.New("schema version is required")
+	}
 	if strings.TrimSpace(job.InputPath) == "" {
 		return errors.New("input path is required")
 	}
@@ -483,6 +486,15 @@ func validateJob(job worker.Job) error {
 	}
 	if strings.TrimSpace(job.GeneratedDir) == "" {
 		return errors.New("generated dir is required")
+	}
+	if job.MaxRetries < 0 {
+		return errors.New("max retries cannot be negative")
+	}
+	if job.RetryCount < 0 {
+		return errors.New("retry count cannot be negative")
+	}
+	if job.RetryCount > job.MaxRetries+1 {
+		return errors.New("retry count exceeds allowed range")
 	}
 	return nil
 }

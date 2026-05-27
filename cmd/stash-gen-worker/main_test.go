@@ -248,6 +248,27 @@ func TestRunNextRecoversStalePending(t *testing.T) {
 	}
 }
 
+func TestRunNextRejectsNegativeRetryCount(t *testing.T) {
+	jobsDir := t.TempDir()
+	job := worker.DefaultJob()
+	job.InputPath = "/library/sample.mp4"
+	job.Checksum = "abc123"
+	job.RetryCount = -1
+	writeQueuedJob(t, filepath.Join(jobsDir, "new", "invalid.json"), job)
+
+	if err := run([]string{"run-next", "--jobs-dir", jobsDir}, io.Discard); err == nil {
+		t.Fatalf("expected run-next to fail for invalid retry count")
+	}
+
+	failed, err := filepath.Glob(filepath.Join(jobsDir, "failed", "*.json"))
+	if err != nil {
+		t.Fatalf("glob failed jobs: %v", err)
+	}
+	if len(failed) != 1 {
+		t.Fatalf("expected invalid job to move to failed, got %d", len(failed))
+	}
+}
+
 func TestRequeueCommandMovesFailedToNew(t *testing.T) {
 	jobsDir := t.TempDir()
 	job := worker.DefaultJob()
