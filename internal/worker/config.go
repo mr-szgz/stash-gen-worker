@@ -7,12 +7,12 @@ import (
 )
 
 type Config struct {
-	JobsDir               string `json:"jobs_dir"`
-	GeneratedDir          string `json:"generated_dir"`
-	FFMpegPath            string `json:"ffmpeg_path"`
-	FFProbePath           string `json:"ffprobe_path"`
-	StashGraphQLEndpoint  string `json:"stash_graphql_endpoint"`
-	StashAPIKey           string `json:"stash_api_key"`
+	JobsDir              string `json:"jobs_dir"`
+	GeneratedDir         string `json:"generated_dir"`
+	FFMpegPath           string `json:"ffmpeg_path"`
+	FFProbePath          string `json:"ffprobe_path"`
+	StashGraphQLEndpoint string `json:"stash_graphql_endpoint"`
+	StashAPIKey          string `json:"stash_api_key"`
 }
 
 func DefaultConfig() Config {
